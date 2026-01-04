@@ -3,7 +3,7 @@ import re
 import random
 import time
 
-TOKEN = "BOT_TOKENINGNI_BU_YERGA_QO‘Y"
+TOKEN = "8142373417:AAHTyYVH2tD0QzFclF44jLZjdz-vEEHbtvo"
 bot = telebot.TeleBot(TOKEN)
 
 # =======================
