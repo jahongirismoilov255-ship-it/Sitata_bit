@@ -7,7 +7,7 @@ import os
 from flask import Flask
 from threading import Thread
 
-TOKEN = "YANGI_TOKEN_BU_YERGA"
+TOKEN = "8142373417:AAHTyYVH2tD0QzFclF44jLZjdz-vEEHbtvo"
 bot = telebot.TeleBot(TOKEN)
 
 # =======================
