@@ -7,7 +7,7 @@ import re
 import time
 
 TOKEN = os.getenv("TOKEN") or "BOT_TOKEN"
-ADMIN_ID = 123456789  # <-- ADMIN ID
+ADMIN_ID = 7789281265  # <-- ADMIN ID
 
 bot = telebot.TeleBot(TOKEN)
 
