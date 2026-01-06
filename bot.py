@@ -1,50 +1,34 @@
 
 import telebot
-import sqlite3
 import os
 import random
 import re
 import time
+from pymongo import MongoClient
 
+# =====================
+# BOT VA ADMIN
+# =====================
 TOKEN = os.getenv("TOKEN") or "BOT_TOKEN"
-ADMIN_ID =  7789281265 # <-- ADMIN 
-
-DB_PATH = "/data/sitatabot.db"
+ADMIN_ID = 7789281265 # <-- Admin ID
 
 bot = telebot.TeleBot(TOKEN)
 
 # =====================
-# SQLITE ULANISH
+# MONGODB ULANISH
 # =====================
-conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-cur = conn.cursor()
+# Atlas connection string
+MONGO_URI = "mongodb+srv://jahonoke110099_db_user:ycICftHiFRr28Omw@cluster0.mongodb.net/?retryWrites=true&w=majority"
 
-# =====================
-# JADVALLAR
-# =====================
-cur.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    nick TEXT
-)
-""")
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS quotes (
-    qid INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT,
-    author TEXT,
-    text TEXT
-)
-""")
-
-conn.commit()
+client = MongoClient(MONGO_URI)
+db = client["sitatabot_db"]
+users_col = db["users"]
+quotes_col = db["quotes"]
 
 # =====================
 # REKLAMA ANIQLASH
 # =====================
 link_pattern = re.compile(r"(https?://|www\.|t\.me/)", re.I)
-
 def has_ad(text):
     return bool(link_pattern.search(text))
 
@@ -54,22 +38,16 @@ def has_ad(text):
 @bot.message_handler(commands=["start"])
 def start(m):
     uid = str(m.chat.id)
-
-    cur.execute("SELECT id FROM users WHERE id=?", (uid,))
-    if cur.fetchone():
+    if users_col.find_one({"id": uid}):
         bot.send_message(uid, "✅ Siz allaqachon ro‘yxatdan o‘tgansiz")
         return
-
     msg = bot.send_message(uid, "Nik yozing:")
     bot.register_next_step_handler(msg, set_nick)
 
 def set_nick(m):
     uid = str(m.chat.id)
     nick = m.text.strip()
-
-    cur.execute("INSERT INTO users (id, nick) VALUES (?, ?)", (uid, nick))
-    conn.commit()
-
+    users_col.insert_one({"id": uid, "nick": nick})
     bot.send_message(uid,
         "✅ Tayyor!\n"
         "/post — sitata yozish\n"
@@ -83,30 +61,20 @@ def set_nick(m):
 @bot.message_handler(commands=["post"])
 def post(m):
     uid = str(m.chat.id)
-
-    cur.execute("SELECT nick FROM users WHERE id=?", (uid,))
-    user = cur.fetchone()
+    user = users_col.find_one({"id": uid})
     if not user:
         bot.send_message(uid, "/start bosing")
         return
-
     msg = bot.send_message(uid, "Sitata yozing:")
-    bot.register_next_step_handler(msg, save_quote, user[0])
+    bot.register_next_step_handler(msg, save_quote, user["nick"])
 
 def save_quote(m, nick):
-    text = m.text.strip()
     uid = str(m.chat.id)
-
+    text = m.text.strip()
     if has_ad(text):
         bot.send_message(uid, "🚫 Reklama mumkin emas")
         return
-
-    cur.execute(
-        "INSERT INTO quotes (user_id, author, text) VALUES (?, ?, ?)",
-        (uid, nick, text)
-    )
-    conn.commit()
-
+    quotes_col.insert_one({"user_id": uid, "author": nick, "text": text})
     bot.send_message(uid, "✅ Saqlandi")
 
 # =====================
@@ -114,14 +82,13 @@ def save_quote(m, nick):
 # =====================
 @bot.message_handler(commands=["sitat"])
 def sitat(m):
-    cur.execute("SELECT text, author FROM quotes ORDER BY RANDOM() LIMIT 1")
-    q = cur.fetchone()
-
+    q = quotes_col.aggregate([{"$sample": {"size": 1}}])
+    q = list(q)
     if not q:
         bot.send_message(m.chat.id, "❌ Sitata yo‘q")
         return
-
-    bot.send_message(m.chat.id, f"“{q[0]}”\n— {q[1]}")
+    q = q[0]
+    bot.send_message(m.chat.id, f"“{q['text']}”\n— {q['author']}")
 
 # =====================
 # O‘Z SITATALARINI O‘CHIRISH
@@ -129,29 +96,21 @@ def sitat(m):
 @bot.message_handler(commands=["myquotes"])
 def myquotes(m):
     uid = str(m.chat.id)
-
-    cur.execute("SELECT qid, text FROM quotes WHERE user_id=?", (uid,))
-    rows = cur.fetchall()
-
-    if not rows:
+    my_quotes = list(quotes_col.find({"user_id": uid}))
+    if not my_quotes:
         bot.send_message(uid, "❌ Sizda sitata yo‘q")
         return
-
     txt = "🗑 O‘chirish uchun raqam yozing:\n\n"
-    for i, r in enumerate(rows):
-        txt += f"{i+1}. {r[1]}\n"
-
+    for i, q in enumerate(my_quotes):
+        txt += f"{i+1}. {q['text']}\n"
     msg = bot.send_message(uid, txt)
-    bot.register_next_step_handler(msg, delete_quote, rows)
+    bot.register_next_step_handler(msg, delete_quote, my_quotes)
 
-def delete_quote(m, rows):
+def delete_quote(m, my_quotes):
     try:
         i = int(m.text) - 1
-        qid = rows[i][0]
-
-        cur.execute("DELETE FROM quotes WHERE qid=?", (qid,))
-        conn.commit()
-
+        q = my_quotes[i]
+        quotes_col.delete_one({"_id": q["_id"]})
         bot.send_message(m.chat.id, "✅ O‘chirildi")
     except:
         bot.send_message(m.chat.id, "❌ Xato")
@@ -163,7 +122,6 @@ def delete_quote(m, rows):
 def admin(m):
     if m.chat.id != ADMIN_ID:
         return
-
     kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("📢 Reklama yuborish")
     bot.send_message(m.chat.id, "Admin panel", reply_markup=kb)
@@ -174,23 +132,20 @@ def ad_start(m):
     bot.register_next_step_handler(msg, send_ad)
 
 def send_ad(m):
-    cur.execute("SELECT id FROM users")
-    users = cur.fetchall()
-
+    users = users_col.find({})
     sent = 0
     for u in users:
         try:
-            bot.copy_message(u[0], m.chat.id, m.message_id)
+            bot.copy_message(u["id"], m.chat.id, m.message_id)
             sent += 1
         except:
             pass
-
-    bot.send_message(m.chat.id, f"✅ {sent} ta foydalanuvchiga yuborildi")
+    bot.send_message(ADMIN_ID, f"✅ {sent} ta foydalanuvchiga yuborildi")
 
 # =====================
-# START
+# START BOT
 # =====================
-print("Sitatabot SQLite bilan ishga tushdi")
+print("Sitatabot MongoDB bilan ishga tushdi")
 
 while True:
     try:
