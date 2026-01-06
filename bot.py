@@ -9,7 +9,7 @@ from pymongo import MongoClient
 # =====================
 # BOT VA ADMIN
 # =====================
-TOKEN = '8142373417:AAHTyYVH2tD0QzFclF44jLZjdz-vEEHbtvo'
+TOKEN = '8142373417:AAHv2Mk3Jn7xPBFhBVtUC7hObERqimgKUqQ'
 ADMIN_ID = 7789281265 # <-- Admin ID
 
 bot = telebot.TeleBot(TOKEN)
