@@ -1,31 +1,44 @@
 
 import telebot
-import json
+import sqlite3
 import os
 import random
 import re
 import time
 
 TOKEN = os.getenv("TOKEN") or "BOT_TOKEN"
-ADMIN_ID = 7789281265  # <-- ADMIN ID
+ADMIN_ID =  7789281265 # <-- ADMIN 
+
+DB_PATH = "/data/sitatabot.db"
 
 bot = telebot.TeleBot(TOKEN)
 
 # =====================
-# JSON FUNKSIYALAR
+# SQLITE ULANISH
 # =====================
-def load(file, default):
-    if os.path.exists(file):
-        with open(file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return default
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+cur = conn.cursor()
 
-def save(file, data):
-    with open(file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+# =====================
+# JADVALLAR
+# =====================
+cur.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    nick TEXT
+)
+""")
 
-users = load("users.json", {})
-quotes = load("quotes.json", [])
+cur.execute("""
+CREATE TABLE IF NOT EXISTS quotes (
+    qid INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT,
+    author TEXT,
+    text TEXT
+)
+""")
+
+conn.commit()
 
 # =====================
 # REKLAMA ANIQLASH
@@ -42,32 +55,26 @@ def has_ad(text):
 def start(m):
     uid = str(m.chat.id)
 
-    if uid in users:
+    cur.execute("SELECT id FROM users WHERE id=?", (uid,))
+    if cur.fetchone():
         bot.send_message(uid, "✅ Siz allaqachon ro‘yxatdan o‘tgansiz")
         return
 
-    users[uid] = {"step": "nick"}
-    save("users.json", users)
-    bot.send_message(uid, "Nik yozing:")
+    msg = bot.send_message(uid, "Nik yozing:")
+    bot.register_next_step_handler(msg, set_nick)
 
-# =====================
-# NIK
-# =====================
-@bot.message_handler(func=lambda m: str(m.chat.id) in users and users[str(m.chat.id)]["step"] == "nick")
 def set_nick(m):
     uid = str(m.chat.id)
     nick = m.text.strip()
 
-    users[uid] = {
-        "nick": nick
-    }
-    save("users.json", users)
+    cur.execute("INSERT INTO users (id, nick) VALUES (?, ?)", (uid, nick))
+    conn.commit()
 
     bot.send_message(uid,
-        f"✅ Tayyor!\n"
-        f"/post — sitata yozish\n"
-        f"/sitat — o‘qish\n"
-        f"/myquotes — o‘chirish"
+        "✅ Tayyor!\n"
+        "/post — sitata yozish\n"
+        "/sitat — o‘qish\n"
+        "/myquotes — o‘chirish"
     )
 
 # =====================
@@ -76,14 +83,17 @@ def set_nick(m):
 @bot.message_handler(commands=["post"])
 def post(m):
     uid = str(m.chat.id)
-    if uid not in users:
+
+    cur.execute("SELECT nick FROM users WHERE id=?", (uid,))
+    user = cur.fetchone()
+    if not user:
         bot.send_message(uid, "/start bosing")
         return
 
     msg = bot.send_message(uid, "Sitata yozing:")
-    bot.register_next_step_handler(msg, save_quote)
+    bot.register_next_step_handler(msg, save_quote, user[0])
 
-def save_quote(m):
+def save_quote(m, nick):
     text = m.text.strip()
     uid = str(m.chat.id)
 
@@ -91,12 +101,12 @@ def save_quote(m):
         bot.send_message(uid, "🚫 Reklama mumkin emas")
         return
 
-    quotes.append({
-        "id": uid,
-        "author": users[uid]["nick"],
-        "text": text
-    })
-    save("quotes.json", quotes)
+    cur.execute(
+        "INSERT INTO quotes (user_id, author, text) VALUES (?, ?, ?)",
+        (uid, nick, text)
+    )
+    conn.commit()
+
     bot.send_message(uid, "✅ Saqlandi")
 
 # =====================
@@ -104,44 +114,50 @@ def save_quote(m):
 # =====================
 @bot.message_handler(commands=["sitat"])
 def sitat(m):
-    if not quotes:
-        bot.send_message(m.chat.id, "❌ Yo‘q")
+    cur.execute("SELECT text, author FROM quotes ORDER BY RANDOM() LIMIT 1")
+    q = cur.fetchone()
+
+    if not q:
+        bot.send_message(m.chat.id, "❌ Sitata yo‘q")
         return
 
-    q = random.choice(quotes)
-    bot.send_message(m.chat.id, f"“{q['text']}”\n— {q['author']}")
+    bot.send_message(m.chat.id, f"“{q[0]}”\n— {q[1]}")
 
 # =====================
 # O‘Z SITATALARINI O‘CHIRISH
 # =====================
 @bot.message_handler(commands=["myquotes"])
-def my_quotes(m):
+def myquotes(m):
     uid = str(m.chat.id)
-    my = [q for q in quotes if q["id"] == uid]
 
-    if not my:
-        bot.send_message(uid, "❌ Sizda yo‘q")
+    cur.execute("SELECT qid, text FROM quotes WHERE user_id=?", (uid,))
+    rows = cur.fetchall()
+
+    if not rows:
+        bot.send_message(uid, "❌ Sizda sitata yo‘q")
         return
 
-    text = "🗑 O‘chirish uchun raqam yozing:\n\n"
-    for i, q in enumerate(my):
-        text += f"{i+1}. {q['text']}\n"
+    txt = "🗑 O‘chirish uchun raqam yozing:\n\n"
+    for i, r in enumerate(rows):
+        txt += f"{i+1}. {r[1]}\n"
 
-    msg = bot.send_message(uid, text)
-    bot.register_next_step_handler(msg, delete_quote, my)
+    msg = bot.send_message(uid, txt)
+    bot.register_next_step_handler(msg, delete_quote, rows)
 
-def delete_quote(m, my):
+def delete_quote(m, rows):
     try:
         i = int(m.text) - 1
-        q = my[i]
-        quotes.remove(q)
-        save("quotes.json", quotes)
+        qid = rows[i][0]
+
+        cur.execute("DELETE FROM quotes WHERE qid=?", (qid,))
+        conn.commit()
+
         bot.send_message(m.chat.id, "✅ O‘chirildi")
     except:
         bot.send_message(m.chat.id, "❌ Xato")
 
 # =====================
-# ADMIN PANEL
+# ADMIN PANEL (REKLAMA)
 # =====================
 @bot.message_handler(commands=["admin"])
 def admin(m):
@@ -154,18 +170,17 @@ def admin(m):
 
 @bot.message_handler(func=lambda m: m.text == "📢 Reklama yuborish" and m.chat.id == ADMIN_ID)
 def ad_start(m):
-    msg = bot.send_message(m.chat.id, "Reklama yuboring (text / rasm / video / audio / link):")
+    msg = bot.send_message(m.chat.id, "Reklama yuboring (har qanday format):")
     bot.register_next_step_handler(msg, send_ad)
 
 def send_ad(m):
+    cur.execute("SELECT id FROM users")
+    users = cur.fetchall()
+
     sent = 0
-    for uid in users:
+    for u in users:
         try:
-            bot.copy_message(
-                chat_id=uid,
-                from_chat_id=m.chat.id,
-                message_id=m.message_id
-            )
+            bot.copy_message(u[0], m.chat.id, m.message_id)
             sent += 1
         except:
             pass
@@ -175,7 +190,7 @@ def send_ad(m):
 # =====================
 # START
 # =====================
-print("Sitatabot v1.2 ishga tushdi")
+print("Sitatabot SQLite bilan ishga tushdi")
 
 while True:
     try:
