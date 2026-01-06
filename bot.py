@@ -1,186 +1,185 @@
+
 import telebot
-import re
-import random
-import time
 import json
 import os
-from flask import Flask
-from threading import Thread
+import random
+import re
+import time
 
-TOKEN = "8142373417:AAHTyYVH2tD0QzFclF44jLZjdz-vEEHbtvo"
+TOKEN = os.getenv("TOKEN") or "BOT_TOKEN"
+ADMIN_ID = 123456789  # <-- ADMIN ID
+
 bot = telebot.TeleBot(TOKEN)
 
-# =======================
-# JSON YUKLASH / SAQLASH
-# =======================
-
-def load_json(file, default):
+# =====================
+# JSON FUNKSIYALAR
+# =====================
+def load(file, default):
     if os.path.exists(file):
         with open(file, "r", encoding="utf-8") as f:
             return json.load(f)
     return default
 
-def save_json(file, data):
+def save(file, data):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-users = load_json("users.json", {})
-nicks = set(load_json("nicks.json", []))
-quotes = load_json("quotes.json", [])
+users = load("users.json", {})
+quotes = load("quotes.json", [])
 
-# =======================
+# =====================
 # REKLAMA ANIQLASH
-# =======================
-
-link_pattern = re.compile(
-    r"(https?://|www\.|t\.me/|\.com|\.ru|\.tj|\.uz)",
-    re.IGNORECASE
-)
+# =====================
+link_pattern = re.compile(r"(https?://|www\.|t\.me/)", re.I)
 
 def has_ad(text):
     return bool(link_pattern.search(text))
 
-# =======================
-# /start
-# =======================
+# =====================
+# /start (1 MARTA)
+# =====================
+@bot.message_handler(commands=["start"])
+def start(m):
+    uid = str(m.chat.id)
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    user_id = str(message.chat.id)
-    users[user_id] = {"step": "lang"}
-    save_json("users.json", users)
-
-    kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🇺🇿 O‘zbek", "🇹🇯 Тоҷикӣ", "🇷🇺 Русский")
-
-    bot.send_message(user_id, "Tilni tanlang:", reply_markup=kb)
-
-# =======================
-# TIL TANLASH
-# =======================
-
-@bot.message_handler(func=lambda m: str(m.chat.id) in users and users[str(m.chat.id)]["step"] == "lang")
-def set_lang(message):
-    user_id = str(message.chat.id)
-    text = message.text
-
-    if "O‘zbek" in text:
-        lang = "uz"
-    elif "Тоҷикӣ" in text:
-        lang = "tj"
-    elif "Русский" in text:
-        lang = "ru"
-    else:
+    if uid in users:
+        bot.send_message(uid, "✅ Siz allaqachon ro‘yxatdan o‘tgansiz")
         return
 
-    users[user_id]["lang"] = lang
-    users[user_id]["step"] = "nick"
-    save_json("users.json", users)
+    users[uid] = {"step": "nick"}
+    save("users.json", users)
+    bot.send_message(uid, "Nik yozing:")
 
-    bot.send_message(user_id, "Nik tanlang:", reply_markup=telebot.types.ReplyKeyboardRemove())
-
-# =======================
-# NIK TANLASH
-# =======================
-
+# =====================
+# NIK
+# =====================
 @bot.message_handler(func=lambda m: str(m.chat.id) in users and users[str(m.chat.id)]["step"] == "nick")
-def set_nick(message):
-    user_id = str(message.chat.id)
-    nick = message.text.strip()
+def set_nick(m):
+    uid = str(m.chat.id)
+    nick = m.text.strip()
 
-    if nick in nicks:
-        bot.send_message(user_id, "❌ Bu nik band")
-        return
+    users[uid] = {
+        "nick": nick
+    }
+    save("users.json", users)
 
-    nicks.add(nick)
-    users[user_id]["nick"] = nick
-    users[user_id]["step"] = "done"
-
-    save_json("users.json", users)
-    save_json("nicks.json", list(nicks))
-
-    bot.send_message(
-        user_id,
-        f"✅ Tayyor!\nNikingiz: {nick}\n\n/post — sitata\n/sitat — o‘qish"
+    bot.send_message(uid,
+        f"✅ Tayyor!\n"
+        f"/post — sitata yozish\n"
+        f"/sitat — o‘qish\n"
+        f"/myquotes — o‘chirish"
     )
 
-# =======================
+# =====================
 # POST
-# =======================
-
-@bot.message_handler(commands=['post'])
-def post_quote(message):
-    user_id = str(message.chat.id)
-
-    if user_id not in users or users[user_id]["step"] != "done":
-        bot.send_message(user_id, "❌ /start bosing")
+# =====================
+@bot.message_handler(commands=["post"])
+def post(m):
+    uid = str(m.chat.id)
+    if uid not in users:
+        bot.send_message(uid, "/start bosing")
         return
 
-    msg = bot.send_message(user_id, "Sitata yozing:")
+    msg = bot.send_message(uid, "Sitata yozing:")
     bot.register_next_step_handler(msg, save_quote)
 
-def save_quote(message):
-    user_id = str(message.chat.id)
-    text = message.text.strip()
+def save_quote(m):
+    text = m.text.strip()
+    uid = str(m.chat.id)
 
     if has_ad(text):
-        bot.send_message(user_id, "🚫 Reklama taqiqlangan")
+        bot.send_message(uid, "🚫 Reklama mumkin emas")
         return
 
     quotes.append({
-        "text": text,
-        "lang": users[user_id]["lang"],
-        "author": users[user_id]["nick"]
+        "id": uid,
+        "author": users[uid]["nick"],
+        "text": text
     })
+    save("quotes.json", quotes)
+    bot.send_message(uid, "✅ Saqlandi")
 
-    save_json("quotes.json", quotes)
-    bot.send_message(user_id, "✅ Saqlandi")
-
-# =======================
+# =====================
 # /sitat
-# =======================
-
-@bot.message_handler(commands=['sitat'])
-def get_quote(message):
-    user_id = str(message.chat.id)
-
-    if user_id not in users:
-        bot.send_message(user_id, "❌ /start")
+# =====================
+@bot.message_handler(commands=["sitat"])
+def sitat(m):
+    if not quotes:
+        bot.send_message(m.chat.id, "❌ Yo‘q")
         return
 
-    lang = users[user_id]["lang"]
-    filtered = [q for q in quotes if q["lang"] == lang]
+    q = random.choice(quotes)
+    bot.send_message(m.chat.id, f"“{q['text']}”\n— {q['author']}")
 
-    if not filtered:
-        bot.send_message(user_id, "❌ Sitata yo‘q")
+# =====================
+# O‘Z SITATALARINI O‘CHIRISH
+# =====================
+@bot.message_handler(commands=["myquotes"])
+def my_quotes(m):
+    uid = str(m.chat.id)
+    my = [q for q in quotes if q["id"] == uid]
+
+    if not my:
+        bot.send_message(uid, "❌ Sizda yo‘q")
         return
 
-    q = random.choice(filtered)
-    bot.send_message(user_id, f"“{q['text']}”\n\n— {q['author']}")
+    text = "🗑 O‘chirish uchun raqam yozing:\n\n"
+    for i, q in enumerate(my):
+        text += f"{i+1}. {q['text']}\n"
 
-# =======================
-# UPTIMEROBOT UCHUN SERVER
-# =======================
+    msg = bot.send_message(uid, text)
+    bot.register_next_step_handler(msg, delete_quote, my)
 
-app = Flask("")
+def delete_quote(m, my):
+    try:
+        i = int(m.text) - 1
+        q = my[i]
+        quotes.remove(q)
+        save("quotes.json", quotes)
+        bot.send_message(m.chat.id, "✅ O‘chirildi")
+    except:
+        bot.send_message(m.chat.id, "❌ Xato")
 
-@app.route("/")
-def home():
-    return "Bot is alive!"
+# =====================
+# ADMIN PANEL
+# =====================
+@bot.message_handler(commands=["admin"])
+def admin(m):
+    if m.chat.id != ADMIN_ID:
+        return
 
-def run_web():
-    app.run(host="0.0.0.0", port=8080)
+    kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("📢 Reklama yuborish")
+    bot.send_message(m.chat.id, "Admin panel", reply_markup=kb)
 
-Thread(target=run_web).start()
+@bot.message_handler(func=lambda m: m.text == "📢 Reklama yuborish" and m.chat.id == ADMIN_ID)
+def ad_start(m):
+    msg = bot.send_message(m.chat.id, "Reklama yuboring (text / rasm / video / audio / link):")
+    bot.register_next_step_handler(msg, send_ad)
 
-# =======================
-# BOT START
-# =======================
+def send_ad(m):
+    sent = 0
+    for uid in users:
+        try:
+            bot.copy_message(
+                chat_id=uid,
+                from_chat_id=m.chat.id,
+                message_id=m.message_id
+            )
+            sent += 1
+        except:
+            pass
 
-print("Bot ishga tushdi...")
+    bot.send_message(m.chat.id, f"✅ {sent} ta foydalanuvchiga yuborildi")
+
+# =====================
+# START
+# =====================
+print("Sitatabot v1.2 ishga tushdi")
+
 while True:
     try:
-        bot.polling(none_stop=True)
+        bot.infinity_polling(timeout=10, long_polling_timeout=5)
     except Exception as e:
-        print("Xatolik:", e)
+        print("Xato:", e)
         time.sleep(5)
