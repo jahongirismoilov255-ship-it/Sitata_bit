@@ -1,25 +1,25 @@
 
 import telebot
-import os
 import random
 import re
 import time
 from pymongo import MongoClient
+from flask import Flask
+from threading import Thread
+import os
 
 # =====================
 # BOT VA ADMIN
 # =====================
 TOKEN = '8142373417:AAHv2Mk3Jn7xPBFhBVtUC7hObERqimgKUqQ'
-ADMIN_ID = 7789281265 # <-- Admin ID
+ADMIN_ID = 7789281265
 
 bot = telebot.TeleBot(TOKEN)
 
 # =====================
 # MONGODB ULANISH
 # =====================
-# Atlas connection string
-MONGO_URI = "mongodb+srv://jahonoke110099_db_user:ycICftHiFRr28Omw@cluster0.mongodb.net/?retryWrites=true&w=majority"
-
+MONGO_URI = os.getenv("MONGO_URI") or "mongodb+srv://jahonoke110099_db_user:ycICftHiFRr28Omw@cluster0.mongodb.net/?retryWrites=true&w=majority"
 client = MongoClient(MONGO_URI)
 db = client["sitatabot_db"]
 users_col = db["users"]
@@ -82,8 +82,7 @@ def save_quote(m, nick):
 # =====================
 @bot.message_handler(commands=["sitat"])
 def sitat(m):
-    q = quotes_col.aggregate([{"$sample": {"size": 1}}])
-    q = list(q)
+    q = list(quotes_col.aggregate([{"$sample": {"size": 1}}]))
     if not q:
         bot.send_message(m.chat.id, "❌ Sitata yo‘q")
         return
@@ -143,13 +142,18 @@ def send_ad(m):
     bot.send_message(ADMIN_ID, f"✅ {sent} ta foydalanuvchiga yuborildi")
 
 # =====================
-# START BOT
+# FLASK UPTIME ROBOT
 # =====================
-print("Sitatabot MongoDB bilan ishga tushdi")
+app = Flask("")
 
-while True:
-    try:
-        bot.infinity_polling(timeout=10, long_polling_timeout=5)
-    except Exception as e:
-        print("Xato:", e)
-        time.sleep(5)
+@app.route("/")
+def home():
+    return "Bot is alive!"
+
+def run():
+    bot.infinity_polling()
+
+Thread(target=run).start()
+Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))).start()
+
+print("Sitatabot MongoDB bilan ishga tushdi")
