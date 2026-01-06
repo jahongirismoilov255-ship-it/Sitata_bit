@@ -1,121 +1,73 @@
 
+from pyrogram import Client
 import telebot
 import random
-import re
-import time
-from pymongo import MongoClient
-from flask import Flask
-from threading import Thread
 import os
 
 # =====================
 # BOT VA ADMIN
 # =====================
-TOKEN = '8142373417:AAHv2Mk3Jn7xPBFhBVtUC7hObERqimgKUqQ'
+TOKEN = "8142373417:AAHv2Mk3Jn7xPBFhBVtUC7hObERqimgKUqQ"
+API_ID = 20811431       # Telegram API ID
+API_HASH = "bf6c21eff58e7b92ffc9ef58b9c24629" # Telegram API Hash
+CHANNEL_ID = "-1003631127626"  # Sizning privat kanal
 ADMIN_ID = 7789281265
 
 bot = telebot.TeleBot(TOKEN)
 
-# =====================
-# MONGODB ULANISH
-# ====================
-MONGO_URI = "mongodb+srv://jahonoke110099_db_user:<db_password>@cluster0.pmyplhd.mongodb.net/?appName=Cluster0"
-client = MongoClient(MONGO_URI) 
-db = client["sitatabot_db"]
-users_col = db["users"]
-quotes_col = db["quotes"]
+# Pyrogram client kanal postlarini olish uchun
+app = Client("sitatabot", api_id=API_ID, api_hash=API_HASH)
 
 # =====================
-# REKLAMA ANIQLASH
-# =====================
-link_pattern = re.compile(r"(https?://|www\.|t\.me/)", re.I)
-def has_ad(text):
-    return bool(link_pattern.search(text))
-
-# =====================
-# /start (1 MARTA)
+# /start
 # =====================
 @bot.message_handler(commands=["start"])
 def start(m):
-    uid = str(m.chat.id)
-    if users_col.find_one({"id": uid}):
-        bot.send_message(uid, "✅ Siz allaqachon ro‘yxatdan o‘tgansiz")
-        return
-    msg = bot.send_message(uid, "Nik yozing:")
-    bot.register_next_step_handler(msg, set_nick)
-
-def set_nick(m):
-    uid = str(m.chat.id)
-    nick = m.text.strip()
-    users_col.insert_one({"id": uid, "nick": nick})
+    uid = m.chat.id
     bot.send_message(uid,
         "✅ Tayyor!\n"
         "/post — sitata yozish\n"
-        "/sitat — o‘qish\n"
-        "/myquotes — o‘chirish"
+        "/sitat — o‘qish"
     )
 
 # =====================
-# POST
+# /post — kanalga yuborish
 # =====================
 @bot.message_handler(commands=["post"])
 def post(m):
-    uid = str(m.chat.id)
-    user = users_col.find_one({"id": uid})
-    if not user:
-        bot.send_message(uid, "/start bosing")
-        return
+    uid = m.chat.id
     msg = bot.send_message(uid, "Sitata yozing:")
-    bot.register_next_step_handler(msg, save_quote, user["nick"])
+    bot.register_next_step_handler(msg, send_to_channel)
 
-def save_quote(m, nick):
-    uid = str(m.chat.id)
-    text = m.text.strip()
-    if has_ad(text):
-        bot.send_message(uid, "🚫 Reklama mumkin emas")
-        return
-    quotes_col.insert_one({"user_id": uid, "author": nick, "text": text})
-    bot.send_message(uid, "✅ Saqlandi")
+def send_to_channel(m):
+    uid = m.chat.id
+    nick = m.from_user.first_name
+    text = m.text
+    # Kanalga yuborish
+    bot.send_message(CHANNEL_ID, f"{text}\n— {nick}")
+    bot.send_message(uid, "✅ Sitata kanalga yuborildi!")
 
 # =====================
-# /sitat
+# /sitat — kanal postlaridan random
 # =====================
 @bot.message_handler(commands=["sitat"])
 def sitat(m):
-    q = list(quotes_col.aggregate([{"$sample": {"size": 1}}]))
-    if not q:
-        bot.send_message(m.chat.id, "❌ Sitata yo‘q")
-        return
-    q = q[0]
-    bot.send_message(m.chat.id, f"“{q['text']}”\n— {q['author']}")
+    uid = m.chat.id
+    with app:
+        # Oxirgi 100 ta postni olish
+        posts = [msg for msg in app.get_chat_history(CHANNEL_ID, limit=100)]
+        if not posts:
+            bot.send_message(uid, "❌ Sitata yo‘q")
+            return
+        q = random.choice(posts)
+        # Xabardan text va author ajratish
+        text_lines = q.text.split("\n—")
+        text = text_lines[0]
+        author = text_lines[1] if len(text_lines) > 1 else "Anonim"
+        bot.send_message(uid, f"“{text}”\n— {author}")
 
 # =====================
-# O‘Z SITATALARINI O‘CHIRISH
-# =====================
-@bot.message_handler(commands=["myquotes"])
-def myquotes(m):
-    uid = str(m.chat.id)
-    my_quotes = list(quotes_col.find({"user_id": uid}))
-    if not my_quotes:
-        bot.send_message(uid, "❌ Sizda sitata yo‘q")
-        return
-    txt = "🗑 O‘chirish uchun raqam yozing:\n\n"
-    for i, q in enumerate(my_quotes):
-        txt += f"{i+1}. {q['text']}\n"
-    msg = bot.send_message(uid, txt)
-    bot.register_next_step_handler(msg, delete_quote, my_quotes)
-
-def delete_quote(m, my_quotes):
-    try:
-        i = int(m.text) - 1
-        q = my_quotes[i]
-        quotes_col.delete_one({"_id": q["_id"]})
-        bot.send_message(m.chat.id, "✅ O‘chirildi")
-    except:
-        bot.send_message(m.chat.id, "❌ Xato")
-
-# =====================
-# ADMIN PANEL (REKLAMA)
+# ADMIN PANEL (reklama)
 # =====================
 @bot.message_handler(commands=["admin"])
 def admin(m):
@@ -131,29 +83,20 @@ def ad_start(m):
     bot.register_next_step_handler(msg, send_ad)
 
 def send_ad(m):
-    users = users_col.find({})
-    sent = 0
-    for u in users:
-        try:
-            bot.copy_message(u["id"], m.chat.id, m.message_id)
-            sent += 1
-        except:
-            pass
-    bot.send_message(ADMIN_ID, f"✅ {sent} ta foydalanuvchiga yuborildi")
+    bot.send_message(CHANNEL_ID, m.text)
+    bot.send_message(ADMIN_ID, "✅ Reklama kanalga yuborildi")
 
 # =====================
-# FLASK UPTIME ROBOT
+# BOT UPTIME
 # =====================
-app = Flask("")
+import threading
+from flask import Flask
 
-@app.route("/")
+flask_app = Flask("")
+
+@flask_app.route("/")
 def home():
     return "Bot is alive!"
 
-def run():
-    bot.infinity_polling()
-
-Thread(target=run).start()
-Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))).start()
-
-print("Sitatabot MongoDB bilan ishga tushdi")
+threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))).start()
+bot.infinity_polling()
