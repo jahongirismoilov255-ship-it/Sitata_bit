@@ -19,7 +19,7 @@ bot = telebot.TeleBot(TOKEN)
 # =====================
 # MONGODB ULANISH
 # ====================
-MONGO_URI = "mongodb://jahonoke110099_db_user:ycICftHiFRr28Omw@cluster0-shard-00-00.abcde.mongodb.net:27017,cluster0-shard-00-01.abcde.mongodb.net:27017,cluster0-shard-00-02.abcde.mongodb.net:27017/sitatabot_db?ssl=true&replicaSet=atlas-xxxxx-shard-0&authSource=admin&retryWrites=true&w=majority"
+MONGO_URI = "mongodb+srv://jahonoke110099_db_user:<db_password>@cluster0.pmyplhd.mongodb.net/?appName=Cluster0"
 client = MongoClient(MONGO_URI) 
 db = client["sitatabot_db"]
 users_col = db["users"]
