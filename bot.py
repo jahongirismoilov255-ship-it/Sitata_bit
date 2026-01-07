@@ -1,93 +1,99 @@
 import telebot
-import random
-import os
-from flask import Flask
-import threading
+import time
+import re
 
-TOKEN = "8142373417:AAHv2Mk3Jn7xPBFhBVtUC7hObERqimgKUqQ"
-CHANNEL_ID = -1003631127626
-ADMIN_ID = 7789281265
+TOKEN = "BOT_TOKENINGNI_BU_YERGA_QO‘Y"
+ADMIN_ID = 7789281265  # o‘zingning Telegram ID
 
 bot = telebot.TeleBot(TOKEN)
 
+# RAM dagi ma’lumotlar (restart bo‘lsa tozalanadi)
+users = set()
+last_send = {}  # spamdan himoya
+
+SPAM_LIMIT = 600  # 10 daqiqa (soniya)
+
 # =====================
-# /start
+# START
 # =====================
-@bot.message_handler(commands=["start"])
-def start(m):
-    bot.send_message(
-        m.chat.id,
-        "✅ Tayyor!\n"
-        "/post — sitata yozish\n"
-        "/sitat — o‘qish"
+@bot.message_handler(commands=['start'])
+def start(msg):
+    users.add(msg.chat.id)
+    bot.reply_to(
+        msg,
+        "👋 Salom!\n\n"
+        "Bu ochiq e’lon bot.\n"
+        "📝 Text yoki 🔗 link yuborsang — hamma foydalanuvchiga 1 marta boradi.\n\n"
+        "❗ Spam qilmang."
     )
 
 # =====================
-# /post
+# ADMIN PANEL
 # =====================
-@bot.message_handler(commands=["post"])
-def post(m):
-    msg = bot.send_message(m.chat.id, "Sitata yozing:")
-    bot.register_next_step_handler(msg, send_to_channel)
+@bot.message_handler(commands=['admin'])
+def admin_panel(msg):
+    if msg.chat.id == ADMIN_ID:
+        bot.reply_to(msg, "👑 Admin panel:\n\n/send — hammaga xabar yuborish")
+    else:
+        bot.reply_to(msg, "⛔ Siz admin emassiz")
 
-def send_to_channel(m):
-    nick = m.from_user.first_name
-    bot.send_message(CHANNEL_ID, f"{m.text}\n— {nick}")
-    bot.send_message(m.chat.id, "✅ Kanalga yuborildi!")
-
-# =====================
-# /sitat (random)
-# =====================
-@bot.message_handler(commands=["sitat"])
-def sitat(m):
-    updates = bot.get_updates(limit=100)
-    quotes = []
-
-    for u in updates:
-        if u.channel_post and u.channel_post.chat.id == CHANNEL_ID:
-            if u.channel_post.text:
-                quotes.append(u.channel_post.text)
-
-    if not quotes:
-        bot.send_message(m.chat.id, "❌ Hozircha sitata yo‘q")
+@bot.message_handler(commands=['send'])
+def admin_send(msg):
+    if msg.chat.id != ADMIN_ID:
         return
 
-    bot.send_message(m.chat.id, random.choice(quotes))
+    sent = bot.send_message(msg.chat.id, "📢 Hammaga yuboriladigan xabarni yozing:")
+    bot.register_next_step_handler(sent, broadcast_admin)
+
+def broadcast_admin(msg):
+    for uid in users:
+        try:
+            bot.send_message(uid, f"🔔 ADMIN E’LONI:\n\n{msg.text}")
+        except:
+            pass
+    bot.reply_to(msg, "✅ Yuborildi")
 
 # =====================
-# ADMIN
+# USER E’LONLARI
 # =====================
-@bot.message_handler(commands=["admin"])
-def admin(m):
-    if m.chat.id != ADMIN_ID:
+@bot.message_handler(func=lambda m: True, content_types=['text'])
+def user_ads(msg):
+    uid = msg.chat.id
+    users.add(uid)
+
+    # admin buyruqlarini o‘tkazib yuborish
+    if msg.text.startswith('/'):
         return
-    kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("📢 Reklama yuborish")
-    bot.send_message(m.chat.id, "Admin panel", reply_markup=kb)
 
-@bot.message_handler(func=lambda m: m.text == "📢 Reklama yuborish" and m.chat.id == ADMIN_ID)
-def ad(m):
-    msg = bot.send_message(m.chat.id, "Reklamani yuboring:")
-    bot.register_next_step_handler(msg, send_ad)
+    now = time.time()
+    if uid in last_send and now - last_send[uid] < SPAM_LIMIT:
+        bot.reply_to(msg, "⏳ Keyinroq yuboring (10 daqiqa limit).")
+        return
 
-def send_ad(m):
-    bot.send_message(CHANNEL_ID, m.text)
-    bot.send_message(ADMIN_ID, "✅ Yuborildi")
+    # oddiy tekshiruv
+    if len(msg.text) > 500:
+        bot.reply_to(msg, "❌ Juda uzun xabar.")
+        return
+
+    if re.search(r"(porn|18\+|casino)", msg.text.lower()):
+        bot.reply_to(msg, "❌ Taqiqlangan kontent.")
+        return
+
+    # hammaga yuborish
+    for user in users:
+        try:
+            bot.send_message(
+                user,
+                f"📣 YANGI E’LON:\n\n{msg.text}\n\n👤 @{msg.from_user.username or 'NoUsername'}"
+            )
+        except:
+            pass
+
+    last_send[uid] = now
+    bot.reply_to(msg, "✅ E’lon yuborildi")
 
 # =====================
-# UPTIME
+# BOT START
 # =====================
-app = Flask("")
-
-@app.route("/")
-def home():
-    return "Bot alive"
-
-threading.Thread(
-    target=lambda: app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000))
-    )
-).start()
-
-bot.infinity_polling()
+print("Bot ishga tushdi...")
+bot.infinity_polling(skip_pending=True)
