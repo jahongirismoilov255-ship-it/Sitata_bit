@@ -4,7 +4,7 @@ import os
 from flask import Flask
 import threading
 
-TOKEN = "TOKENING"
+TOKEN = "8142373417:AAHv2Mk3Jn7xPBFhBVtUC7hObERqimgKUqQ"
 CHANNEL_ID = -1003631127626
 ADMIN_ID = 7789281265
 
