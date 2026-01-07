@@ -2,7 +2,7 @@ import telebot
 import time
 import re
 
-TOKEN = "BOT_TOKENINGNI_BU_YERGA_QO‘Y"
+TOKEN = "8142373417:AAHv2Mk3Jn7xPBFhBVtUC7hObERqimgKUqQ"
 ADMIN_ID = 7789281265  # o‘zingning Telegram ID
 
 bot = telebot.TeleBot(TOKEN)
